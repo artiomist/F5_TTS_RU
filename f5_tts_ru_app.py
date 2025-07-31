@@ -7,6 +7,10 @@ import sys
 import gc
 import tempfile
 
+import time
+from datetime import timedelta
+
+
 from pathlib import Path
 
 # =========================
@@ -73,14 +77,6 @@ from huggingface_hub import hf_hub_download
 
 from vocos import Vocos
 
-# logging
-import logging
-
-# Set up basic configuration for logging
-logging.basicConfig(
-    level=logging.DEBUG,  # Minimum level of messages to capture, INFO, WARNING, ERROR, DEBUG
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Log format
-)
 
 # GUI / App Framework
 import gradio as gr
@@ -101,6 +97,14 @@ from f5_tts_ru_utils.utils import (
 )
 
 
+# logging
+import logging
+
+# Set up basic configuration for logging
+logging.basicConfig(
+    level=config.LOGGINGLEVEL,
+    format=config.LOGGINGFORMAT, 
+)
     
 
 USING_SPACES = False
@@ -112,13 +116,13 @@ def gpu_decorator(func):
 
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--port", type=int, default=7860)
-parser.add_argument("--gpu", type=int, default=config.DEFAULT_GPU)
-args = parser.parse_args()
-config.CURRENT_GPU = args.gpu
+#parser = argparse.ArgumentParser()
+#parser.add_argument("--port", type=int, default=7860)
+#parser.add_argument("--gpu", type=int, default=config.DEFAULT_GPU)
+#args = parser.parse_args()
+#config.CURRENT_GPU = args.gpu
        
-logging.info(f"🔧 Using GPU {args.gpu} on port {args.port} | Split Inference between 2 GPU: {config.SPLIT_INFERENCE_BETWEEN_TWO_GPU}") 
+#logging.info(f"🔧 Using GPU {config.CURRENT_GPU} | Split Inference between 2 GPU: {config.SPLIT_INFERENCE_BETWEEN_TWO_GPU}") 
 
 
 
@@ -543,6 +547,9 @@ def basic_tts(
 
             # === Count total batches across all chapters ===
             total_book_steps = 0
+            #gpu0_steps = 0
+            #gpu1_steps = 0
+            gpu_name = "GPU 0"
             # Step 1: Load reference audio to get duration
             ref_text = ref_text or ""
             if ref_text == "":
@@ -570,14 +577,33 @@ def basic_tts(
 
             #print(f"Estimated total inference chapters: {total_book_steps}")
             logging.info("Estimated inference steps per chapter:")
+            
+            start_time = time.time()
+            chapter_step_counts = {}
+            gpu_step_counts = {0: 0, 1: 0}
+            completed_steps = 0
+
             for i, (ch_title, ch_text) in enumerate(chapters):
                 chapter_batches_estimate = chunk_text_for_total_inference_steps_estimate(ch_text, max_chars=max_chars)
                 #batches_per_chapter.append(chapter_batches_estimate)
                 step_count = len(chapter_batches_estimate)
                 total_book_steps += step_count
-                print(f"  Chapter {i+1}: '{ch_title[:40]}...' → {step_count} step(s)")
+                chapter_step_counts[i] = step_count
+                if config.SPLIT_INFERENCE_BETWEEN_TWO_GPU:
+                    if i%2:
+                        #gpu0_steps += step_count
+                        gpu_step_counts[0] += step_count
+                        gpu_name = "GPU 0"
+                    else:
+                        #gpu1_steps += step_count
+                        gpu_step_counts[1] += step_count
+                        gpu_name = "GPU 1"
+                print(f"  Chapter {i+1}: '{ch_title[:40]}...' → {step_count} step(s) on {gpu_name}")
 
             logging.info(f"Total inference steps: {total_book_steps}\n")
+            #if config.SPLIT_INFERENCE_BETWEEN_TWO_GPU:
+            #    logging.info(f"GPU 0 inference steps: {gpu0_steps}\n")
+            #    logging.info(f"GPU 1 inference steps: {gpu1_steps}\n")
 
             
             # === Synthesize speech per chapter ===
@@ -716,6 +742,58 @@ def basic_tts(
                                 logging.error(f"❌ Failed to convert WAV to MP3: {e}")
 
                     os.remove(temp_wav)
+                    
+                    
+                    # === Track and Log ETA ===
+                    completed_steps += chapter_step_counts.get(chapter_idx, 0)
+                    elapsed_time = time.time() - start_time
+                    avg_time_per_step = elapsed_time / completed_steps if completed_steps else 0
+
+                    steps_remaining = gpu_step_counts[config.CURRENT_GPU] - completed_steps
+                    eta_seconds = steps_remaining * avg_time_per_step
+                    
+                    # Round ETA to nearest minute, format as ~Hh Mm
+                    eta_minutes = int(round(eta_seconds / 60))
+                    eta_hours = eta_minutes // 60
+                    eta_minutes = eta_minutes % 60
+                    eta_formatted = f"~{eta_hours}h {eta_minutes}m"
+
+                    percent_complete = (completed_steps / gpu_step_counts[config.CURRENT_GPU]) * 100 if gpu_step_counts[config.CURRENT_GPU] else 0
+
+                    chapters_remaining = [
+                        i for i in range(len(chapters))
+                        if i % 2 == config.CURRENT_GPU and i > chapter_idx
+                    ]
+                    remaining_chapters_count = len(chapters_remaining)
+
+                    #eta_message = f"⏳ {remaining_chapters_count} chapters remaining ({steps_remaining} steps), " \
+                    #              f"{percent_complete:.2f}% complete, ETA: {eta_formatted}"
+                    chapter_title_short = ch_title[:50].replace("\n", " ").strip()
+
+                    eta_message = (
+                        f'chapter #{chapter_idx + 1:02d} "{chapter_title_short}" done, '
+                        f'{remaining_chapters_count} chapters remaining '
+                        f'({steps_remaining} steps) on GPU {config.CURRENT_GPU}, '
+                        f'{percent_complete:6.2f}% complete, ETA: {eta_formatted}'
+                    )
+
+                    logging.info(eta_message)
+
+                    # === Log ETA to a separate file ===
+                    try:
+                        #eta_log_path = book_dir.parent / "ETA_log.txt"
+                        eta_log_path = book_dir / "ETA_log.txt"
+                        with open(eta_log_path, "a", encoding="utf-8") as f:
+                            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {eta_message}\n")
+                    except Exception as e:
+                        logging.error(f"❌ Failed to write ETA log: {e}")
+                    #eta_log_path = book_dir.parent / "ETA_log.txt"
+                    #with open(eta_log_path, "a", encoding="utf-8") as f:
+                    #    f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {eta_message}\n")
+
+                    
+                    
+                    
                     #Explicitly clear GPU cache, After each chapter.
                     torch.cuda.empty_cache()
                     gc.collect()  # import gc

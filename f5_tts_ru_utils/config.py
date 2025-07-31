@@ -67,8 +67,8 @@ VERIFICATION_DICT_DEFAULT_TO_ZERO = False #When ambiguous word found auto accept
 
 # === 2. Inference ===
 AUTO_CONTINUE_TO_INFERENCE = False #Auto press Inference button, for single GPU permits manual edits of _accentuated.txt files, for multiple GPU is ignored
-DEFAULT_GPU = 0
-SPLIT_INFERENCE_BETWEEN_TWO_GPU = False # Set to True to use multiple GPUs for batch processing
+CURRENT_GPU = 0
+SPLIT_INFERENCE_BETWEEN_TWO_GPU = True # Set to True to use multiple GPUs for batch processing
 
 # === 3. M4B & Chapter Settings ===
 CREATE_MP3 = False
@@ -89,3 +89,6 @@ GRADIO_DESCRIPTION = (
 
 # === External Tools ===
 #FFMPEG_BINARY = "ffmpeg"
+import logging 
+LOGGINGLEVEL = logging.INFO  # Minimum level of messages to capture, DEBUG, INFO, WARNING, ERROR
+LOGGINGFORMAT = '%(asctime)s - %(levelname)s - %(message)s'  # Log format

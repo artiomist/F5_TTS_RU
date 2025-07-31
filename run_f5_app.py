@@ -1,8 +1,16 @@
 # run_cli.py
+'''
+python .\run_f5_app.py --gpu 1 --port 7861
+python .\run_f5_app.py --gpu 0 --port 7860
+'''
 import sys
-import logging
 import click
 from f5_tts_ru_utils import config
+import logging
+logging.basicConfig(
+    level=config.LOGGINGLEVEL,
+    format=config.LOGGINGFORMAT, 
+)
 from f5_tts_ru_app import create_gradio_app
 
 @click.command()
@@ -12,7 +20,7 @@ from f5_tts_ru_app import create_gradio_app
 @click.option("--api", "-a", is_flag=True, default=True, help="Allow API access")
 @click.option("--gpu", type=int, default=config.CURRENT_GPU, help="Which GPU to use (e.g. 0 or 1)")
 def main(port, host, share, api, gpu):
-    logging.info(f"🔧 Using GPU {gpu} on port {port}")
+    logging.info(f"🔧 Using GPU {gpu} on port {port} | Split Inference between 2 GPU: {config.SPLIT_INFERENCE_BETWEEN_TWO_GPU}")
     config.CURRENT_GPU = gpu
 
     app = create_gradio_app()

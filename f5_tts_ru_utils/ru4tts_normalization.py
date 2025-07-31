@@ -12,13 +12,21 @@ Implemented
 - Roman numbers to arabic numbers
 """
 
-
+import importlib.util
+import os
+import json
 import re
 import unicodedata
 from .patch_dict import word_transliteration_exceptions, abbreviation_exceptions, common_abbreviation_expansions
+from .custom_patch_dict import custom_abbreviation_exceptions
 from functools import lru_cache
 from . import config
 
+import logging
+logging.basicConfig(
+    level=config.LOGGINGLEVEL,
+    format=config.LOGGINGFORMAT 
+)
 
 # Define mapping for digraphs and individual Latin letters
 cyrrilization_mapping_extended = {
@@ -62,6 +70,38 @@ roman_regex = re.compile(r'\bM{0,4}(CM|CD|D?C{0,3})'
 # Match context patterns, e.g. Глава IV
 contextual_exceptions = re.compile(r'(\b[А-Яа-яЁё]+)\s+([ХІВIVXLCDM]+)\b')
 
+
+
+def save_custom_abbreviation(word, pronunciation, context):
+    file_path = os.path.join(os.path.dirname(__file__), "custom_patch_dict.py")
+
+    # Load current content
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        local_dict = {}
+        exec(content, {}, local_dict)
+        current_dict = local_dict.get("custom_abbreviation_exceptions", {})
+    except Exception as e:
+        logging.error(f"[ERROR] Failed to load custom_patch_dict.py: {e}")
+        current_dict = {}
+
+    # Add new entry
+    current_dict[word] = pronunciation
+
+    # Rewrite the file
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("custom_abbreviation_exceptions = {\n")
+            for k, v in current_dict.items():
+                context_comment = f"  # context: {context}" if k == word else ""
+                f.write(f'    "{k}": "{v}",{context_comment}\n')
+            f.write("}\n")
+            logging.info("[INFO] Abbreviation saved with context comment.")
+    except Exception as e:
+        logging.error(f"[ERROR] Failed to write to custom_patch_dict.py: {e}")
+        
+        
 def is_latin_char(ch):
     """Check if a single character is a Latin letter."""
     try:
@@ -514,7 +554,7 @@ def convert_time_expressions(text: str) -> str:
 
 # Function to expand abbreviations in the text
 def process_all_caps_words(text: str, all_caps_to_lower: bool = False) -> str:#, interactive: bool = True) -> str:
-    print(f"[DEBUG] all_caps_to_lower received: {all_caps_to_lower}")
+    logging.debug(f"[EBUG] all_caps_to_lower received: {all_caps_to_lower}")
     # Now you can use all_caps_to_lower inside this function if needed
 
     """
@@ -540,6 +580,11 @@ def process_all_caps_words(text: str, all_caps_to_lower: bool = False) -> str:#,
             pronounced_form = abbreviation_exceptions[word]
             text = re.sub(rf'\b{word}\b', pronounced_form, text)
             continue
+            
+        if word in custom_abbreviation_exceptions:
+            pronounced_form = custom_abbreviation_exceptions[word]
+            text = re.sub(rf'\b{word}\b', pronounced_form, text)
+            continue
 
         if all_caps_to_lower==False:
             # Find context of the word in the text
@@ -550,10 +595,11 @@ def process_all_caps_words(text: str, all_caps_to_lower: bool = False) -> str:#,
             else:
                 start_context = max(0, start_idx - context_chars)
                 end_context = min(len(text), start_idx + len(word) + context_chars)
-                context_snippet = text[start_context:end_context]
+                #context_snippet = text[start_context:end_context]
                 # Optionally highlight the word in the context, e.g. uppercase it or surround with []
                 # Since word is already uppercase, just show as-is with some marker:
-                context_snippet = context_snippet.replace(word, f"[{word}]")
+                #context_snippet = context_snippet.replace(word, f"[{word}]")
+                context_snippet = text[start_context:end_context].replace(word, f"[{word}]")
 
             print(f"\n[DETECTED ALL-CAPS]: {word}")
             print(f"Context: ...{context_snippet}...")
@@ -566,9 +612,10 @@ def process_all_caps_words(text: str, all_caps_to_lower: bool = False) -> str:#,
             elif choice == '1':
                 spelled_out = ' '.join(pronunciation_map.get(letter, letter.lower()) for letter in word)
                 text = re.sub(rf'\b{word}\b', spelled_out, text)
+                save_custom_abbreviation(word, spelled_out, context_snippet)  # ✅ Save it for future
                 print("Spelled out abbreviation.")
             else:
-                print("Invalid input. Please enter 0 or 1, or press Enter to keep the current form.")
+                print("Invalid input. Please enter 0 or 1.")
         else:
             text = re.sub(rf'\b{word}\b', word.lower(), text)
 

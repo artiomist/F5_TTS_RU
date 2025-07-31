@@ -1,11 +1,16 @@
 import os
 import re
 import subprocess
-import logging
 from pathlib import Path
 from mutagen.mp4 import MP4
 
 from . import config
+
+import logging
+logging.basicConfig(
+    level=config.LOGGINGLEVEL,
+    format=config.LOGGINGFORMAT, 
+)
 from .utils import (
     sanitize_filename,
 )

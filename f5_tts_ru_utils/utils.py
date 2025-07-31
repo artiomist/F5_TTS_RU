@@ -11,8 +11,6 @@ from pathlib import Path
 # Metadata handling
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, error
 from mutagen.mp4 import MP4, MP4Cover
-# logging
-import logging
 
 from PIL import Image, ImageDraw, ImageFont  # For image resizing in ensure_even_dimensions
 #logging.debug(f"PIL.Image imported in {time.time() - start:.2f}s")
@@ -20,7 +18,12 @@ from PIL import Image, ImageDraw, ImageFont  # For image resizing in ensure_even
 # 📦 Custom Project Modules / Local Imports
 # =========================
 from . import config
-
+# logging
+import logging
+logging.basicConfig(
+    level=config.LOGGINGLEVEL,
+    format=config.LOGGINGFORMAT, 
+)
 
 
 def init_directories(sanitized_name):
