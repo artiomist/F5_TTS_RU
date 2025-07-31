@@ -1,7 +1,6 @@
 import os
 import re
 import magic
-import logging
 import shutil
 import subprocess
 from bs4 import BeautifulSoup
@@ -19,6 +18,11 @@ from .utils import (
     create_placeholder_cover
 )
 from . import config
+import logging
+logging.basicConfig(
+    level=config.LOGGINGLEVEL,
+    format=config.LOGGINGFORMAT, 
+)
 from .ru4tts_normalization import normalize_russian
 from .patch_dict import verification_dict, replacement_dict
 from pathlib import Path  # Used in russian_normalisation_accentuation
@@ -191,13 +195,13 @@ def russian_normalisation_accentuation(txt_path, accentizer, all_caps_to_lower=F
 
         # Step 1: Check for already processed (accented) file
         if processed_path.exists():
-            print(f"[SKIP] Accentuated file already exists: {processed_path}")
+            logging.info(f"[SKIP] Accentuated file already exists: {processed_path}")
             with open(processed_path, 'r', encoding='utf-8') as f:
                 return f.read()
 
         # Step 2: Check for existing normalized file
         if normalized_path.exists():
-            print(f"[SKIP] Normalized file already exists: {normalized_path}")
+            logging.info(f"[SKIP] Normalized file already exists: {normalized_path}")
             with open(normalized_path, 'r', encoding='utf-8') as norm_file:
                 normalized_lines = [line.strip() for line in norm_file.readlines()]
         else:
@@ -213,7 +217,7 @@ def russian_normalisation_accentuation(txt_path, accentizer, all_caps_to_lower=F
             with open(normalized_path, 'w', encoding='utf-8') as norm_file:
                 for line in normalized_lines:
                     norm_file.write(line + '\n')
-            print(f"[INFO] Normalized text saved: {normalized_path}")
+            logging.info(f"[INFO] Normalized text saved: {normalized_path}")
 
         # Step 3: Accentuation pipeline
         accented_lines, empty_line_counts, trailing_empty, _ = process_text_with_accentuator(normalized_lines, accentizer)
@@ -236,11 +240,11 @@ def russian_normalisation_accentuation(txt_path, accentizer, all_caps_to_lower=F
             for line in final_lines:
                 outfile.write(line + '\n')
 
-        print(f"[INFO] Accentuated + breaks inserted: {processed_path}")
+        logging.info(f"[INFO] Accentuated + breaks inserted: {processed_path}")
         return '\n'.join(final_lines)
 
     except Exception as e:
-        print(f"[ERROR] Failed to process {txt_path}: {e}")
+        logging.error(f"[ERROR] Failed to process {txt_path}: {e}")
         raise
 
 
@@ -306,16 +310,30 @@ def verify_and_patch_stress(accented_lines, verification_dict_all_default_to_zer
         i = 0
         while i < len(words):
             word = words[i]
-            word_clean = re.sub(r'[^\wа-яА-ЯёЁ+]', '', word)
-            word_base = word_clean
-            word_stripped = word_clean.replace('+', '')
+            #word_clean = re.sub(r'[^\wа-яА-ЯёЁ+]', '', word)
+            #word_base = word_clean
+            #word_stripped = word_clean.replace('+', '')
+            match = re.match(r"^([^\wа-яА-ЯёЁ+]*)([\wа-яА-ЯёЁ+]+)([^\wа-яА-ЯёЁ+]*)$", word)
+            if match:
+                prefix, word_core, suffix = match.groups()
+            else:
+                prefix, word_core, suffix = '', word, ''
+
+            word_stripped = word_core.replace('+', '')
+            word_base = word_core
 
             # Replacement dict — always replace
             
             replacement = get_dict_regex_replacement(word_stripped, replacement_dict)
+            #if replacement is not None:
+            #    logging.info(f"[REPLACED] {word} → {prefix}{replacement}{suffix}")
+            #    #new_words.append(replacement)
+            #    new_words.append(prefix + replacement + suffix)
             if replacement is not None:
-                print(f"[REPLACED] {word} → {replacement}")
-                new_words.append(replacement)
+                new_word = prefix + replacement + suffix
+                if new_word != word:
+                    logging.info(f"[REPLACED] {word} → {new_word}")
+                new_words.append(new_word)
 
             # Verification dict — ask user
             elif word_stripped in verification_dict:
@@ -350,7 +368,8 @@ def verify_and_patch_stress(accented_lines, verification_dict_all_default_to_zer
 
                 if verification_dict_all_default_to_zero:
                             print(f"[AUTO-ACCEPT] Using option 0: {options[0]}")
-                            new_words.append(options[0])
+                            #new_words.append(options[0])
+                            new_words.append(prefix + options[0] + suffix)
                 else:
                     while True:
                         prompt = f"Choose correct stress [0/1]{' (press Enter to keep current)' if default_choice is not None else ''}: "
@@ -358,10 +377,10 @@ def verify_and_patch_stress(accented_lines, verification_dict_all_default_to_zer
 
                         if choice == '' and default_choice is not None:
                             print(f"[ACCEPTED] Using current form: {options[default_choice]}")
-                            new_words.append(options[default_choice])
+                            new_words.append(prefix +options[default_choice] + suffix)
                             break
                         elif choice in ['0', '1']:
-                            new_words.append(options[int(choice)])
+                            new_words.append(prefix +options[int(choice)] + suffix)
                             break
                         else:
                             print("Invalid input. Please enter 0 or 1, or press Enter to keep the current form.")
@@ -388,7 +407,7 @@ def get_dict_regex_replacement(word_stripped, replacement_dict):
     # 1. Exact match
     if word_core in replacement_dict:
         replacement = replacement_dict[word_core][0]
-        return replacement + trailing_punct
+        return replacement# + trailing_punct
     
     # 2. Wildcard match: keys with '*'     Райновск* = "Райновским" "Райновский" "Райновскому"
     for key_pattern, replacements in replacement_dict.items():
@@ -413,7 +432,7 @@ def detect_multiple_stresses(line):
         if '-' in clean_word:
             continue  # Skip hyphenated words
         if clean_word.count('+') >= 2:
-            print(f"[MULTI-STRESS WARNING] Word with multiple '+' found: {word}")
+            logging.info(f"[MULTI-STRESS WARNING] Word with multiple '+' found: {word}")
             
             
 def insert_breaks(accented_lines, empty_line_counts, trailing_empty):
